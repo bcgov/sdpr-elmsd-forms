@@ -1,0 +1,231 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  creationTimestamp: null
+  name: elmsd-forms-sample
+labels:
+  template: elmsd-forms-sample
+  app: elmsd-forms-sample
+objects:
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    creationTimestamp: null
+    name: ${NAME}-static${SUFFIX}
+    labels:
+      app: elmsd-forms-sample
+      app.kubernetes.io/component: client
+      app.kubernetes.io/part-of: elmsd-forms-sample
+      app.openshift.io/runtime: nginx  
+  spec:
+    replicas: 1
+    selector:
+      deploymentconfig: ${NAME}-static${SUFFIX}
+    strategy:
+      resources:
+        requests:
+          cpu: '100m'
+        limits:
+          cpu: '150m'
+    template:
+      metadata:
+        creationTimestamp: null
+        labels:
+          deploymentconfig: ${NAME}-static${SUFFIX}
+      spec:
+        containers:
+        - image: ${NAME}-static:${TAG}
+          name: elmsd-forms-sample
+          ports:
+          - containerPort: 8080
+            protocol: TCP
+          resources:
+            requests:
+              cpu: '100m'
+            limits:
+              cpu: '150m'
+          volumeMounts:
+          - name: ${VOLUME_NAME}
+            mountPath: /etc/nginx/conf.d/default.conf
+            readOnly: true
+            subPath: default.conf
+        volumes:
+        - name: ${VOLUME_NAME}
+          configMap:
+            defaultMode: 420
+            name: ${NAME}-nginx
+    test: false
+    triggers:
+    - type: ConfigChange
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - elmsd-forms-sample
+        from:
+          kind: ImageStreamTag
+          name: '${NAME}-static:${TAG}'
+          namespace: ${IMAGE_NAMESPACE}
+      type: ImageChange
+- apiVersion: v1
+  data:
+    default.conf: |
+      server {
+        listen 8080;
+        root /var/www/html/build/;
+        location /api/form {
+            proxy_pass ${API_URL};
+        }
+        location / {
+          try_files $uri /index.html;
+
+          add_header Cache-Control 'no-cache';
+        }
+      }
+  kind: ConfigMap
+  metadata:
+    creationTimestamp: null
+    name: ${CONFIG_NAME}
+    labels:
+      app: elmsd-forms-sample
+  type: Opaque
+- apiVersion: v1
+  kind: Service
+  metadata:
+    creationTimestamp: null
+    name: ${NAME}-static${SUFFIX}
+  spec:
+    ports:
+    - name: web
+      port: 8080
+      protocol: TCP
+      targetPort: 8080
+    selector:
+      deploymentconfig: ${NAME}-static${SUFFIX}
+- apiVersion: route.openshift.io/v1
+  kind: Route
+  metadata:
+    creationTimestamp: null
+    name: ${NAME}-static${SUFFIX}
+  spec:
+    host: ${HOST_VALUE}
+    port:
+      targetPort: web
+    tls:
+      insecureEdgeTerminationPolicy: Redirect
+      termination: edge
+    to:
+      kind: Service
+      name: ${NAME}-static${SUFFIX}
+      weight: 100
+    wildcardPolicy: None
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    creationTimestamp: null
+    name: ${NAME}-api${SUFFIX}
+    labels:
+      app: elmsd-forms-sample
+      app.kubernetes.io/component: api
+      app.kubernetes.io/part-of: elmsd-forms-sample
+      app.openshift.io/runtime: nodejs
+  spec:
+    replicas: 1
+    selector:
+      deploymentconfig: ${NAME}-api${SUFFIX}
+    strategy:
+      resources:
+        requests:
+          cpu: '100m'
+        limits:
+          cpu: '150m'
+    template:
+      metadata:
+        creationTimestamp: null
+        labels:
+          deploymentconfig: ${NAME}-api${SUFFIX}
+      spec:
+        containers:
+        - image: ${NAME}-api:${TAG}
+          name: elmsd-forms-sample-api
+          ports:
+          - containerPort: 8000
+            protocol: TCP
+          resources:
+            requests:
+              cpu: '100m'
+            limits:
+              cpu: '150m'
+          env:
+          - name: OPENSHIFT_NODEJS_CLIENTURL
+            value: ${OPENSHIFT_NODEJS_CLIENTURL}
+    test: false
+    triggers:
+    - type: ConfigChange
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - elmsd-forms-sample-api
+        from:
+          kind: ImageStreamTag
+          name: ${NAME}-api:${TAG}
+          namespace: ${IMAGE_NAMESPACE}
+      type: ImageChange
+- apiVersion: v1
+  kind: Service
+  metadata:
+    creationTimestamp: null
+    name: ${NAME}-api${SUFFIX}
+  spec:
+    ports:
+    - name: api
+      port: 8000
+      protocol: TCP
+      targetPort: 8000
+    selector:
+      deploymentconfig: ${NAME}-api${SUFFIX}
+parameters:
+- description: A name used for all objects
+  displayName: Name
+  name: NAME
+  required: true
+  value: elmsd-forms-sample
+- description: A name suffix used for all objects
+  displayName: Suffix
+  name: SUFFIX
+  required: false
+  value: ''
+- description: Tag used for the image tags
+  displayName: tag
+  name: TAG
+  required: true
+  value: latest 
+- description: A name used for routes/services and deployment configs
+  displayName: Host
+  name: HOST_VALUE
+  required: false
+  value: ''
+- description: Name used for the nginx config map
+  displayName: config name
+  name: CONFIG_NAME
+  required: false
+  value: elmsd-forms-sample-nginx
+- description: A volume used for the nginx from config map
+  displayName: volume name
+  name: VOLUME_NAME
+  required: false
+  value: nginx-config
+- description: The API URL to pass requests to 
+  displayName: API URL
+  name: API_URL
+  required: true
+  value: ''
+- description: URL for email
+  displayName: Client URL
+  name: OPENSHIFT_NODEJS_CLIENTURL
+  required: false
+  value: ''
+- description: The namespace of the OS project containing the imagestreams
+  displayName: Image Namespace
+  name: IMAGE_NAMESPACE
+  required: true
+  value: myproject-tools
